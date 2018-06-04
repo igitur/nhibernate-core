@@ -493,5 +493,26 @@ namespace NHibernate.Test.Futures
 				tx.Commit();
 			}
 		}
+
+		[Test]
+		public void FutureAutoFlush()
+		{
+			using (var s = OpenSession())
+			using (s.BeginTransaction())
+			{
+				s.FlushMode = FlushMode.Auto;
+				var p1 = new Person
+				{
+					Name = "Person name",
+					Age = 15
+				};
+				s.Save(p1);
+				s.Flush();
+
+				s.Delete(p1);
+				var count = s.QueryOver<Person>().ToRowCountQuery().FutureValue<int>().Value;
+				Assert.That(count, Is.EqualTo(0), "Session wasn't auto flushed.");
+			}
+		}
 	}
 }

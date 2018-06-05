@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using NHibernate.Linq;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -10,35 +11,34 @@ namespace NHibernate.Test.NHSpecificTest.NH3864
 		protected override void OnSetUp()
 		{
 			Clear2ndLevelCache();
-			using (ISession s = OpenSession())
-			using (ITransaction tx = s.BeginTransaction())
+			using (var session = OpenSession())
+			using (var transaction = session.BeginTransaction())
 			{
 				var p1 = new Person() { Name = "A" };
 				var p1c1 = new Person() { Name = "AA" };
 				var p1c2 = new Person() { Name = "AB" };
 				var p1c3 = new Person() { Name = "AC" };
 				p1.Children = new HashSet<Person>(new[] { p1c1, p1c2, p1c3 });
-				s.Save(p1);
+				session.Save(p1);
 
 				var p2 = new Person() { Name = "B" };
 				var p2c1 = new Person() { Name = "BA" };
 				var p2c2 = new Person() { Name = "BB" };
 				var p2c3 = new Person() { Name = "BC" };
 				p2.Children = new HashSet<Person>(new[] { p2c1, p2c2, p2c3 });
-				s.Save(p2);
+				session.Save(p2);
 
-				tx.Commit();
+				transaction.Commit();
 			}
 		}
 
 		protected override void OnTearDown()
 		{
-			base.OnTearDown();
-			using (ISession s = OpenSession())
-			using (ITransaction tx = s.BeginTransaction())
+			using (var session = OpenSession())
+			using (var transaction = session.BeginTransaction())
 			{
-				s.Delete("from Person");
-				tx.Commit();
+				session.Delete("from Person");
+				transaction.Commit();
 			}
 		}
 
@@ -46,72 +46,87 @@ namespace NHibernate.Test.NHSpecificTest.NH3864
 		public void CacheableMulticriteria_QueryOverWithAliasedJoinQueryOver()
 		{
 			ExecuteActionTwiceSecondRunEnsureNoSqlExecuted(() =>
+			{
+				using (var session = Sfi.OpenSession())
 				{
-					using (var s = Sfi.OpenSession())
-					{
-						var query = CreateQueryOverWithAliasedJoinQueryOver(s);
+					var query = CreateQueryOverWithAliasedJoinQueryOver(session);
 
-						var multiCriteria = s.CreateMultiCriteria();
-						multiCriteria.Add("myQuery", query);
-						multiCriteria.SetCacheable(true);
+					var multiCriteria = session.CreateMultiCriteria();
+					multiCriteria.Add("myQuery", query);
+					multiCriteria.SetCacheable(true);
 
-						var list = (IList<Person>)multiCriteria.GetResult("myQuery");
-						AssertQueryResult(list);
-					}
-				});
+					var list = (IList<Person>)multiCriteria.GetResult("myQuery");
+					AssertQueryResult(list);
+				}
+			});
 		}
 
 		[Test]
 		public void CacheableFuture_QueryOverWithAliasedJoinQueryOver()
 		{
 			ExecuteActionTwiceSecondRunEnsureNoSqlExecuted(() =>
+			{
+				using (var s = Sfi.OpenSession())
 				{
-					using (var s = Sfi.OpenSession())
-					{
-						var query = CreateQueryOverWithAliasedJoinQueryOver(s)
-							.Cacheable()
-							.Future();
+					var query = CreateQueryOverWithAliasedJoinQueryOver(s)
+						.Cacheable()
+						.Future();
 
-						var list = query.ToList();
-						AssertQueryResult(list);
-					}
-				});
+					var list = query.ToList();
+					AssertQueryResult(list);
+				}
+			});
 		}
 
 		[Test]
 		public void CacheableMulticriteria_QueryOverWithJoinAlias()
 		{
 			ExecuteActionTwiceSecondRunEnsureNoSqlExecuted(() =>
+			{
+				using (var s = Sfi.OpenSession())
 				{
-					using (var s = Sfi.OpenSession())
-					{
-						var query = CreateQueryOverWithJoinAlias(s);
+					var query = CreateQueryOverWithJoinAlias(s);
 
-						var multiCriteria = s.CreateMultiCriteria();
-						multiCriteria.Add("myQuery", query);
-						multiCriteria.SetCacheable(true);
+					var multiCriteria = s.CreateMultiCriteria();
+					multiCriteria.Add("myQuery", query);
+					multiCriteria.SetCacheable(true);
 
-						var list = (IList<Person>)multiCriteria.GetResult("myQuery");
-						AssertQueryResult(list);
-					}
-				});
+					var list = (IList<Person>)multiCriteria.GetResult("myQuery");
+					AssertQueryResult(list);
+				}
+			});
 		}
 
 		[Test]
 		public void CacheableFuture_QueryOverWithJoinAlias()
 		{
 			ExecuteActionTwiceSecondRunEnsureNoSqlExecuted(() =>
+			{
+				using (var s = Sfi.OpenSession())
 				{
-					using (var s = Sfi.OpenSession())
-					{
-						var query = CreateQueryOverWithJoinAlias(s)
-							.Cacheable()
-							.Future();
+					var query = CreateQueryOverWithJoinAlias(s)
+						.Cacheable()
+						.Future();
 
-						var list = query.ToList();
-						AssertQueryResult(list);
-					}
-				});
+					var list = query.ToList();
+					AssertQueryResult(list);
+				}
+			});
+		}
+
+		[Test]
+		public void CacheableFuture_QueryWithSubQuery()
+		{
+			ExecuteActionTwiceSecondRunEnsureNoSqlExecuted(() =>
+			{
+				using (var session = Sfi.OpenSession())
+				{
+					var query = CreateCacheableQueryWithSubquery(session);
+
+					var list = query.ToList();
+					AssertQueryResult(list);
+				}
+			});
 		}
 
 		private static void AssertQueryResult(IList<Person> list)
@@ -124,6 +139,20 @@ namespace NHibernate.Test.NHSpecificTest.NH3864
 
 			CollectionAssert.AreEquivalent(person1.Children.Select(c => c.Name), new[] { "AA", "AB", "AC" });
 			CollectionAssert.AreEquivalent(person2.Children.Select(c => c.Name), new[] { "BA", "BB", "BC" });
+		}
+
+		private static IFutureEnumerable<Person> CreateCacheableQueryWithSubquery(ISession session)
+		{
+			var subQuery = session.Query<Person>()
+				.WithOptions(p => p.SetCacheable(true));
+
+			var query = session.Query<Person>()
+				.FetchMany(p => p.Children)
+				.Where(p => subQuery.Contains(p) && p.Parent == null)
+				.WithOptions(o => o.SetCacheable(true))
+				.ToFuture();
+
+			return query;
 		}
 
 		private static IQueryOver<Person, Person> CreateQueryOverWithJoinAlias(ISession session)
